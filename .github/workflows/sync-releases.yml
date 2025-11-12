@@ -1,0 +1,53 @@
+name: 同步外部发布资产
+
+on:
+  schedule:
+    - cron: '0 15 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.RELEASE_SYNC_PAT }}
+
+      - name: 设置 Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: 获取当前运行时间
+        id: datetime
+        run: echo "utc=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> $GITHUB_OUTPUT
+
+      - name: 同步最新发布
+        run: python scripts/sync_releases.py
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASE_SYNC_PAT }}
+          GITHUB_RUN_DATETIME: ${{ steps.datetime.outputs.utc }}
+
+      - name: 检查是否有更新
+        id: changes
+        run: |
+          if [[ -n "$(git status --porcelain)" ]]; then
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: 提交并推送更新
+        if: steps.changes.outputs.has_changes == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add artifacts
+          git commit -m "chore: 更新外部发布版本"
+          git push
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASE_SYNC_PAT }}
